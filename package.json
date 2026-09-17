@@ -1,0 +1,33 @@
+{
+  "name": "leadrelay",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "setup:airtable": "node --dns-result-order=ipv4first --network-family-autoselection-attempt-timeout=2000 --env-file=.env.local scripts/setup-airtable.mjs",
+    "test:lead": "node --dns-result-order=ipv4first --network-family-autoselection-attempt-timeout=2000 --env-file=.env.local scripts/send-test-lead.mjs",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router": "^8.4.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "oxlint": "^1.81.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  }
+}
