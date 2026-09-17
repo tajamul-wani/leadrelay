@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router'
 import { CheckIcon } from '../components/icons'
 import { StepHeading } from '../components/ui'
 import { useFunnel } from '../funnel/FunnelContext'
-import { nextStepId, type ChoiceStep } from '../funnel/steps'
+import { nextStepId, stepPath, type ChoiceStep } from '../funnel/steps'
 import { trackStep } from '../lib/pixel'
 
 type Props = {
@@ -30,7 +30,7 @@ export function ChoicePage({ step, stepIndex }: Props) {
     trackStep(stepIndex + 1)
     setTimeout(() => {
       const next = nextStepId(step.id, updated)
-      if (next) navigate(`/${next}`)
+      if (next) navigate(stepPath(next))
     }, ADVANCE_DELAY_MS)
   }
 

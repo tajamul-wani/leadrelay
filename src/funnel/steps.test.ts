@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { firstIncompleteStepId, isQualified, nextStepId, pruneAnswers, visibleStepIds } from './steps'
+import { firstIncompleteStepId, isQualified, nextStepId, pruneAnswers, stepPath, visibleStepIds } from './steps'
 
 describe('step flow', () => {
   it('skips application follow-ups when the user has not applied', () => {
@@ -17,6 +17,11 @@ describe('step flow', () => {
     expect(nextStepId('zip', {})).toBe('age')
     expect(nextStepId('marital_status', {})).toBe('contact')
     expect(nextStepId('contact', {})).toBeNull()
+  })
+
+  it('puts the first step at the root path', () => {
+    expect(stepPath('zip')).toBe('/')
+    expect(stepPath('age')).toBe('/age')
   })
 
   it('finds the first unanswered step', () => {

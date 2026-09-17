@@ -3,7 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from '
 import { RESTRICTED_STATES } from '../shared/compliance'
 import { Layout } from './components/Layout'
 import { FunnelProvider, useFunnel } from './funnel/FunnelContext'
-import { CONTACT_STEP_ID, firstIncompleteStepId, QUIZ_STEPS, visibleStepIds, ZIP_STEP_ID } from './funnel/steps'
+import { CONTACT_STEP_ID, firstIncompleteStepId, QUIZ_STEPS, stepPath, visibleStepIds, ZIP_STEP_ID } from './funnel/steps'
 import { ChoicePage } from './pages/ChoicePage'
 import { ContactPage } from './pages/ContactPage'
 import { PrivacyPage, TermsPage, ThankYouPage, UnavailablePage } from './pages/InfoPages'
@@ -17,16 +17,20 @@ function ScrollToTop() {
   return null
 }
 
-function StepRoute() {
-  const { stepId = '' } = useParams()
+function StepRoute({ landing = false }: { landing?: boolean }) {
+  const { stepId = ZIP_STEP_ID } = useParams()
   const { answers } = useFunnel()
   const ids = visibleStepIds(answers)
   const index = ids.indexOf(stepId)
   const firstIncomplete = firstIncompleteStepId(answers)
 
   // Unknown steps, or steps beyond the first unanswered one, redirect to where the user should be.
+  // The first step lives at "/", so its own path redirects there.
+  if (!landing && stepId === ZIP_STEP_ID) {
+    return <Navigate to={{ pathname: '/', search: window.location.search }} replace />
+  }
   if (index < 0 || index > ids.indexOf(firstIncomplete)) {
-    return <Navigate to={`/${firstIncomplete}`} replace />
+    return <Navigate to={stepPath(firstIncomplete)} replace />
   }
   // A restricted state blocks every step after ZIP, including via the Back button or a typed URL.
   if (stepId !== ZIP_STEP_ID && RESTRICTED_STATES.includes(answers.state)) {
@@ -51,8 +55,7 @@ export default function App() {
       <FunnelProvider>
         <ScrollToTop />
         <Routes>
-          {/* Keep campaign parameters in the URL when redirecting to the first step. */}
-          <Route path="/" element={<Navigate to={{ pathname: `/${ZIP_STEP_ID}`, search: window.location.search }} replace />} />
+          <Route path="/" element={<StepRoute landing />} />
           <Route path="/thank-you" element={<Layout><ThankYouPage /></Layout>} />
           <Route path="/unavailable" element={<Layout><UnavailablePage /></Layout>} />
           <Route path="/privacy" element={<Layout><PrivacyPage /></Layout>} />

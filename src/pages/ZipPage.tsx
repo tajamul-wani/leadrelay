@@ -6,7 +6,7 @@ import { CheckIcon } from '../components/icons'
 import { FieldError, fieldClass, primaryButtonClass, StepHeading } from '../components/ui'
 import { useFunnel } from '../funnel/FunnelContext'
 import { STATE_NAMES } from '../funnel/stateNames'
-import { nextStepId, ZIP_STEP_ID } from '../funnel/steps'
+import { nextStepId, stepPath, ZIP_STEP_ID } from '../funnel/steps'
 import { trackStep } from '../lib/pixel'
 
 export function ZipPage({ stepIndex }: { stepIndex: number }) {
@@ -29,7 +29,7 @@ export function ZipPage({ stepIndex }: { stepIndex: number }) {
       return
     }
     trackStep(stepIndex + 1)
-    navigate(`/${nextStepId(ZIP_STEP_ID, updated)}`)
+    navigate(stepPath(nextStepId(ZIP_STEP_ID, updated) ?? ZIP_STEP_ID))
   }
 
   return (

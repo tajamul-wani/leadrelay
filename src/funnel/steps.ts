@@ -124,6 +124,11 @@ export function visibleStepIds(answers: Answers): string[] {
   return [ZIP_STEP_ID, ...QUIZ_STEPS.filter((step) => !step.when || step.when(answers)).map((step) => step.id), CONTACT_STEP_ID]
 }
 
+/** URL path for a step. The first step is the landing page, so it has no path segment. */
+export function stepPath(stepId: string): string {
+  return stepId === ZIP_STEP_ID ? '/' : `/${stepId}`
+}
+
 export function nextStepId(currentId: string, answers: Answers): string | null {
   const ids = visibleStepIds(answers)
   const index = ids.indexOf(currentId)
