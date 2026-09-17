@@ -51,7 +51,8 @@ export default function App() {
       <FunnelProvider>
         <ScrollToTop />
         <Routes>
-          <Route path="/" element={<Navigate to={`/${ZIP_STEP_ID}`} replace />} />
+          {/* Keep campaign parameters in the URL when redirecting to the first step. */}
+          <Route path="/" element={<Navigate to={{ pathname: `/${ZIP_STEP_ID}`, search: window.location.search }} replace />} />
           <Route path="/thank-you" element={<Layout><ThankYouPage /></Layout>} />
           <Route path="/unavailable" element={<Layout><UnavailablePage /></Layout>} />
           <Route path="/privacy" element={<Layout><PrivacyPage /></Layout>} />
