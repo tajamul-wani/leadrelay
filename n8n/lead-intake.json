@@ -1,0 +1,516 @@
+{
+  "name": "LeadRelay · Lead Intake",
+  "nodes": [
+    {
+      "id": "0b7c1a10-0001-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "leadrelay-intake",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "leadrelay-intake",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "LeadRelay Webhook Secret"
+        }
+      }
+    },
+    {
+      "id": "0b7c1a10-0002-4000-8000-000000000002",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-1",
+              "name": "airtable_base_id",
+              "value": "appREPLACE_ME",
+              "type": "string"
+            },
+            {
+              "id": "cfg-2",
+              "name": "meta_pixel_id",
+              "value": "REPLACE_ME",
+              "type": "string"
+            },
+            {
+              "id": "cfg-3",
+              "name": "meta_graph_version",
+              "value": "v24.0",
+              "type": "string"
+            },
+            {
+              "id": "cfg-4",
+              "name": "meta_test_event_code",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "cfg-5",
+              "name": "restricted_states",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "0b7c1a10-0003-4000-8000-000000000003",
+      "name": "Validate Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Validates the payload and maps it to Airtable field names.\n// Runs even though the Vercel function validates too: replays and\n// any other caller reach this webhook without passing through Vercel.\n\nconst body = $('Webhook').first().json.body ?? {};\nconst cfg = $('Config').first().json;\n\nconst errors = [];\nconst check = (ok, message) => { if (!ok) errors.push(message); };\nconst isNonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;\nconst UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\n\nconst contact = body.contact ?? {};\nconst consent = body.consent ?? {};\nconst attribution = body.attribution ?? {};\nconst context = body.context ?? {};\n\ncheck(UUID.test(body.lead_id ?? ''), 'lead_id must be a UUID');\ncheck(UUID.test(body.event_id ?? ''), 'event_id must be a UUID');\ncheck(isNonEmpty(contact.first_name), 'contact.first_name is required');\ncheck(isNonEmpty(contact.last_name), 'contact.last_name is required');\ncheck(/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test((contact.email ?? '').trim()), 'contact.email is invalid');\ncheck(/^\\+1\\d{10}$/.test(contact.phone ?? ''), 'contact.phone must be E.164 (+1XXXXXXXXXX)');\ncheck(/^\\d{5}$/.test(contact.zip ?? ''), 'contact.zip must be 5 digits');\ncheck(/^[A-Z]{2}$/.test(contact.state ?? ''), 'contact.state must be a two-letter code');\ncheck(consent.given === true, 'consent.given must be true');\ncheck(isNonEmpty(consent.text), 'consent.text is required');\n\nif (errors.length > 0) {\n  return [{ json: { valid: false, errors } }];\n}\n\nconst restricted = cfg.restricted_states\n  .split(',')\n  .map((s) => s.trim().toUpperCase())\n  .filter(Boolean);\n\nconst fields = {\n  'Lead ID': body.lead_id,\n  'Meta Event ID': body.event_id,\n  'Submitted At': body.submitted_at,\n  'Received At': context.received_at ?? new Date().toISOString(),\n  'First Name': contact.first_name.trim(),\n  'Last Name': contact.last_name.trim(),\n  'Email': contact.email.trim().toLowerCase(),\n  'Phone': contact.phone,\n  'ZIP': contact.zip,\n  'State': contact.state,\n  'Qualification Status': body.quiz?.qualified ? 'Qualified' : 'Needs Review',\n  'Quiz Answers': JSON.stringify(body.quiz?.answers ?? {}, null, 2),\n  'Consent Given': true,\n  'Consent Text': consent.text,\n  'Consent Timestamp': consent.timestamp,\n  'IP Address': context.ip,\n  'User Agent': context.user_agent,\n  'Page URL': attribution.page_url,\n  'UTM Source': attribution.utm_source,\n  'UTM Medium': attribution.utm_medium,\n  'UTM Campaign': attribution.utm_campaign,\n  'UTM Content': attribution.utm_content,\n  'UTM Term': attribution.utm_term,\n  'fbclid': attribution.fbclid,\n  'fbc': attribution.fbc,\n  'fbp': attribution.fbp,\n  'Referrer': attribution.referrer,\n  'Funnel Variant': attribution.variant,\n  'CAPI Status': 'Pending',\n  'Routing': restricted.includes(contact.state) ? 'Restricted State' : 'Standard',\n  'Is Test': body.is_test === true,\n  'Ingest Path': body.ingest_path === 'replay' ? 'Replay' : 'Live',\n  'Raw Payload': JSON.stringify(body, null, 2),\n};\n\n// Omit empty values so a replay never blanks out existing data.\nfor (const key of Object.keys(fields)) {\n  if (fields[key] === null || fields[key] === undefined || fields[key] === '') delete fields[key];\n}\n\nreturn [{ json: { valid: true, lead: body, fields } }];\n"
+      }
+    },
+    {
+      "id": "0b7c1a10-0004-4000-8000-000000000004",
+      "name": "Is Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "0b7c1a10-0005-4000-8000-000000000005",
+      "name": "Respond 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        480
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, errors: $json.errors }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "0b7c1a10-0006-4000-8000-000000000006",
+      "name": "Upsert Lead (Airtable)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.airtable.com/v0/{{ $('Config').first().json.airtable_base_id }}/Leads",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "airtableTokenApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ performUpsert: { fieldsToMergeOn: ['Lead ID'] }, typecast: true, records: [{ fields: $json.fields }] }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "",
+          "name": "LeadRelay Airtable"
+        }
+      }
+    },
+    {
+      "id": "0b7c1a10-0007-4000-8000-000000000007",
+      "name": "Respond 503",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        400
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: 'storage_unavailable' }) }}",
+        "options": {
+          "responseCode": 503
+        }
+      }
+    },
+    {
+      "id": "0b7c1a10-0008-4000-8000-000000000008",
+      "name": "Fail: Airtable Write",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        400
+      ],
+      "parameters": {
+        "errorMessage": "=Airtable upsert failed for lead {{ $('Validate Lead').first().json.lead.lead_id }} | {{ $json.error_summary }}"
+      }
+    },
+    {
+      "id": "0b7c1a10-0009-4000-8000-000000000009",
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, lead_id: $('Validate Lead').first().json.lead.lead_id }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "0b7c1a10-0010-4000-8000-000000000010",
+      "name": "Build CAPI Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Builds the Meta Conversions API Lead event.\n// PII is normalized, then SHA-256 hashed. IP, user agent, fbc and fbp\n// are sent unhashed, as Meta requires. Quiz answers are never sent.\n\nconst crypto = require('crypto');\n\nconst lead = $('Validate Lead').first().json.lead;\nconst cfg = $('Config').first().json;\nconst contact = lead.contact;\nconst attribution = lead.attribution ?? {};\nconst context = lead.context ?? {};\n\nconst sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');\nconst hashed = (value) => (value ? [sha256(value)] : undefined);\nconst lower = (value) => (value ?? '').toString().trim().toLowerCase();\n\nconst userData = {\n  em: hashed(lower(contact.email)),\n  ph: hashed(contact.phone.replace(/\\D/g, '')),\n  fn: hashed(lower(contact.first_name).replace(/[^\\p{L}]/gu, '')),\n  ln: hashed(lower(contact.last_name).replace(/[^\\p{L}]/gu, '')),\n  st: hashed(lower(contact.state)),\n  zp: hashed(contact.zip.slice(0, 5)),\n  country: hashed('us'),\n  external_id: hashed(lower(lead.lead_id)),\n  client_ip_address: context.ip || undefined,\n  client_user_agent: context.user_agent || undefined,\n  fbc: attribution.fbc || undefined,\n  fbp: attribution.fbp || undefined,\n};\nfor (const key of Object.keys(userData)) {\n  if (userData[key] === undefined) delete userData[key];\n}\n\n// Meta rejects future timestamps and events older than 7 days.\nconst submitted = Math.floor(Date.parse(lead.submitted_at) / 1000);\nconst now = Math.floor(Date.now() / 1000);\nconst eventTime = Number.isFinite(submitted) ? Math.min(submitted, now) : now;\n\nconst payload = {\n  data: [\n    {\n      event_name: 'Lead',\n      event_time: eventTime,\n      event_id: lead.event_id,\n      action_source: 'website',\n      event_source_url: attribution.page_url,\n      user_data: userData,\n      custom_data: { funnel_variant: attribution.variant ?? undefined },\n    },\n  ],\n};\nif (cfg.meta_test_event_code) payload.test_event_code = cfg.meta_test_event_code;\n\nreturn [{ json: { payload } }];\n"
+      }
+    },
+    {
+      "id": "0b7c1a10-0011-4000-8000-000000000011",
+      "name": "Send to Meta CAPI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/{{ $('Config').first().json.meta_graph_version }}/{{ $('Config').first().json.meta_pixel_id }}/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "LeadRelay Meta CAPI"
+        }
+      }
+    },
+    {
+      "id": "0b7c1a10-0012-4000-8000-000000000012",
+      "name": "Mark CAPI Sent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.airtable.com/v0/{{ $('Config').first().json.airtable_base_id }}/Leads/{{ $('Upsert Lead (Airtable)').first().json.records[0].id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "airtableTokenApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ typecast: true, fields: { 'CAPI Status': 'Sent', 'CAPI Sent At': new Date().toISOString(), 'CAPI Attempts': ($('Upsert Lead (Airtable)').first().json.records[0].fields['CAPI Attempts'] ?? 0) + 1, 'CAPI Last Error': null } }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "",
+          "name": "LeadRelay Airtable"
+        }
+      }
+    },
+    {
+      "id": "0b7c1a10-0013-4000-8000-000000000013",
+      "name": "Mark CAPI Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        220
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.airtable.com/v0/{{ $('Config').first().json.airtable_base_id }}/Leads/{{ $('Upsert Lead (Airtable)').first().json.records[0].id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "airtableTokenApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ typecast: true, fields: { 'CAPI Status': 'Failed', 'CAPI Attempts': ($('Upsert Lead (Airtable)').first().json.records[0].fields['CAPI Attempts'] ?? 0) + 1, 'CAPI Last Error': $json.error_summary } }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "",
+          "name": "LeadRelay Airtable"
+        }
+      }
+    },
+    {
+      "id": "0b7c1a10-0014-4000-8000-000000000014",
+      "name": "Fail: CAPI Delivery",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        2200,
+        220
+      ],
+      "parameters": {
+        "errorMessage": "=Meta CAPI delivery failed for lead {{ $('Validate Lead').first().json.lead.lead_id }} | {{ $('Summarize CAPI Error').first().json.error_summary }}"
+      }
+    },
+    {
+      "id": "0b7c1a10-0015-4000-8000-000000000015",
+      "name": "Summarize Airtable Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        400
+      ],
+      "parameters": {
+        "jsCode": "// Reduces an HTTP error to a short summary with credentials removed.\n// Raw n8n HTTP errors include request headers (Authorization), and some\n// APIs echo the token back in the message, so the raw error is never stored.\n\nconst REDACTIONS = [\n  /Bearer\\s+[^\\s\"'\\\\]+/gi,\n  /\\bEAA[A-Za-z0-9]{10,}[^\\s\"'\\\\]*/g,\n  /\\bpat[A-Za-z0-9]{10,}\\.[A-Za-z0-9]+/g,\n];\nconst redact = (text) => REDACTIONS.reduce((t, re) => t.replace(re, '[REDACTED]'), String(text ?? ''));\n\nconst err = $json.error ?? {};\nlet apiError = err.error;\nif (typeof apiError === 'string') {\n  try { apiError = JSON.parse(apiError); } catch { /* keep raw string */ }\n}\nif (apiError && typeof apiError === 'object' && 'error' in apiError) apiError = apiError.error;\n\nconst status = err.statusCode ?? err.status ?? err.httpCode;\nconst details = apiError && typeof apiError === 'object' ? apiError : {};\nconst message = typeof apiError === 'string' ? apiError : details.message ?? err.message ?? err.description ?? 'Unknown error';\n\nconst summary = redact(\n  [\n    status && `HTTP ${status}`,\n    details.type,\n    details.code !== undefined && `code ${details.code}`,\n    message,\n    details.fbtrace_id && `fbtrace_id ${details.fbtrace_id}`,\n  ]\n    .filter(Boolean)\n    .join(' | '),\n).slice(0, 1000);\n\nconst { error, ...rest } = $json;\nreturn [{ json: { ...rest, error_summary: summary } }];\n"
+      }
+    },
+    {
+      "id": "0b7c1a10-0016-4000-8000-000000000016",
+      "name": "Summarize CAPI Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        220
+      ],
+      "parameters": {
+        "jsCode": "// Reduces an HTTP error to a short summary with credentials removed.\n// Raw n8n HTTP errors include request headers (Authorization), and some\n// APIs echo the token back in the message, so the raw error is never stored.\n\nconst REDACTIONS = [\n  /Bearer\\s+[^\\s\"'\\\\]+/gi,\n  /\\bEAA[A-Za-z0-9]{10,}[^\\s\"'\\\\]*/g,\n  /\\bpat[A-Za-z0-9]{10,}\\.[A-Za-z0-9]+/g,\n];\nconst redact = (text) => REDACTIONS.reduce((t, re) => t.replace(re, '[REDACTED]'), String(text ?? ''));\n\nconst err = $json.error ?? {};\nlet apiError = err.error;\nif (typeof apiError === 'string') {\n  try { apiError = JSON.parse(apiError); } catch { /* keep raw string */ }\n}\nif (apiError && typeof apiError === 'object' && 'error' in apiError) apiError = apiError.error;\n\nconst status = err.statusCode ?? err.status ?? err.httpCode;\nconst details = apiError && typeof apiError === 'object' ? apiError : {};\nconst message = typeof apiError === 'string' ? apiError : details.message ?? err.message ?? err.description ?? 'Unknown error';\n\nconst summary = redact(\n  [\n    status && `HTTP ${status}`,\n    details.type,\n    details.code !== undefined && `code ${details.code}`,\n    message,\n    details.fbtrace_id && `fbtrace_id ${details.fbtrace_id}`,\n  ]\n    .filter(Boolean)\n    .join(' | '),\n).slice(0, 1000);\n\nconst { error, ...rest } = $json;\nreturn [{ json: { ...rest, error_summary: summary } }];\n"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Validate Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Lead": {
+      "main": [
+        [
+          {
+            "node": "Is Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid?": {
+      "main": [
+        [
+          {
+            "node": "Upsert Lead (Airtable)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Lead (Airtable)": {
+      "main": [
+        [
+          {
+            "node": "Respond 200",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Summarize Airtable Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond 503": {
+      "main": [
+        [
+          {
+            "node": "Fail: Airtable Write",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond 200": {
+      "main": [
+        [
+          {
+            "node": "Build CAPI Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build CAPI Event": {
+      "main": [
+        [
+          {
+            "node": "Send to Meta CAPI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Meta CAPI": {
+      "main": [
+        [
+          {
+            "node": "Mark CAPI Sent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Summarize CAPI Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark CAPI Failed": {
+      "main": [
+        [
+          {
+            "node": "Fail: CAPI Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Airtable Error": {
+      "main": [
+        [
+          {
+            "node": "Respond 503",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize CAPI Error": {
+      "main": [
+        [
+          {
+            "node": "Mark CAPI Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
