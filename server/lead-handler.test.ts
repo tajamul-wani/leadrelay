@@ -90,16 +90,20 @@ describe('handleLead', () => {
     expect(calls.map((c) => new URL(c.url).host)).toEqual(['n8n.test', 'api.airtable.com', 'hooks.slack.test'])
     const record = JSON.parse(calls[1].body).records[0].fields
     expect(record).toMatchObject({ 'Lead ID': lead.lead_id, 'CAPI Status': 'Pending', 'Ingest Path': 'Fallback' })
-    const alert = calls[2].body
-    expect(alert).toContain(lead.lead_id)
-    expect(alert).not.toContain('jane@example.com')
-    expect(alert).not.toContain('+14155552671')
+    const alert = JSON.parse(calls[2].body)
+    expect(alert.blocks[0].text.text).toContain('Lead stored via fallback')
+    expect(alert.blocks[1].fields.map((f: { text: string }) => f.text).join(' ')).toContain(lead.lead_id)
+    expect(calls[2].body).not.toContain('jane@example.com')
+    expect(calls[2].body).not.toContain('+14155552671')
   })
 
-  it('returns 503 when n8n and Airtable are both unavailable', async () => {
-    const { deps } = setup({ 'https://n8n.test': [new Error('down')], 'https://api.airtable.com': [500], 'https://hooks.slack.test': [200] })
+  it('returns 503 and raises a critical alert when n8n and Airtable are both unavailable', async () => {
+    const { deps, calls } = setup({ 'https://n8n.test': [new Error('down')], 'https://api.airtable.com': [500], 'https://hooks.slack.test': [200] })
     const res = await handleLead(post(lead), deps)
     expect(res.status).toBe(503)
+    const alert = JSON.parse(calls.at(-1)!.body)
+    expect(alert.blocks[0].text.text).toContain('Lead could not be stored')
+    expect(alert.text).toContain(':rotating_light:')
   })
 })
 

@@ -1,0 +1,86 @@
+{
+  "name": "LeadRelay · Error Handler",
+  "nodes": [
+    {
+      "id": "1a2b3c40-0001-4000-8000-000000000001",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "1a2b3c40-0002-4000-8000-000000000002",
+      "name": "Build Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Turns a failed execution into a structured Slack alert.\n// Alerts carry IDs and error codes only: never contact details, and never raw\n// errors, which can contain request headers with credentials.\n\nconst REDACTIONS = [\n  /Bearer\\s+[^\\s\"'\\\\]+/gi,\n  /\\bEAA[A-Za-z0-9]{10,}[^\\s\"'\\\\]*/g,\n  /\\bpat[A-Za-z0-9]{10,}\\.[A-Za-z0-9]+/g,\n  /\\bxox[baprs]-[A-Za-z0-9-]+/g,\n];\nconst redact = (text) => REDACTIONS.reduce((t, re) => t.replace(re, '[REDACTED]'), String(text ?? ''));\n\nconst event = $json;\nconst workflow = event.workflow?.name ?? 'unknown workflow';\nconst execution = event.execution ?? {};\nconst failedStep = execution.lastNodeExecuted ?? 'unknown step';\nconst raw = redact(execution.error?.message ?? 'No error message');\nconst [summary, ...detail] = raw.split('|').map((part) => part.trim());\nconst leadId = (raw.match(/lead ([0-9a-f-]{36})/i) ?? [])[1];\n\n// What the failure means for the lead, so whoever is on call knows if it is urgent.\nlet impact = 'Check the execution to see what the failed step left behind.';\nif (/CAPI|Meta/i.test(failedStep)) {\n  impact = 'Lead is stored in Airtable. The Meta event is marked Failed and the replay workflow will retry it.';\n} else if (/Airtable/i.test(failedStep)) {\n  impact = 'Lead was not stored by n8n. The API fallback should have written it directly; confirm the record exists.';\n}\n\nconst lines = [\n  ':rotating_light: *Lead pipeline failure*',\n  '',\n  `*Workflow*  \\`${workflow}\\``,\n  `*Failed step*  \\`${failedStep}\\``,\n  leadId ? `*Lead*  \\`${leadId}\\`` : null,\n  `*Error*  ${summary}`,\n  detail.length ? `> ${detail.join(' | ').slice(0, 500)}` : null,\n  '',\n  `*Impact*  ${impact}`,\n  execution.url ? `<${execution.url}|Open execution in n8n>` : null,\n].filter((line) => line !== null);\n\nreturn [{ json: { text: lines.join('\\n'), lead_id: leadId ?? null } }];\n"
+      }
+    },
+    {
+      "id": "1a2b3c40-0003-4000-8000-000000000003",
+      "name": "Post to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        480,
+        300
+      ],
+      "parameters": {
+        "authentication": "accessToken",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#leadrelay-alerts",
+          "mode": "name"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": "LeadRelay Slack"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert": {
+      "main": [
+        [
+          {
+            "node": "Post to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

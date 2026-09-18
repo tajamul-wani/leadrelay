@@ -1,0 +1,306 @@
+{
+  "name": "LeadRelay · Replay Failed",
+  "nodes": [
+    {
+      "id": "2b3c4d50-0001-4000-8000-000000000001",
+      "name": "Every 15 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "2b3c4d50-0002-4000-8000-000000000002",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-1",
+              "name": "airtable_base_id",
+              "value": "appREPLACE_ME",
+              "type": "string"
+            },
+            {
+              "id": "cfg-2",
+              "name": "intake_webhook_url",
+              "value": "https://REPLACE_ME/webhook/leadrelay-intake",
+              "type": "string"
+            },
+            {
+              "id": "cfg-3",
+              "name": "max_age_days",
+              "value": "7",
+              "type": "string"
+            },
+            {
+              "id": "cfg-4",
+              "name": "min_age_minutes",
+              "value": "10",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "2b3c4d50-0003-4000-8000-000000000003",
+      "name": "Find Undelivered Leads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "parameters": {
+        "url": "=https://api.airtable.com/v0/{{ $json.airtable_base_id }}/Leads",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "airtableTokenApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "filterByFormula",
+              "value": "=AND(OR({CAPI Status}='Failed',{CAPI Status}='Pending'),{Raw Payload}!='',IS_AFTER({Received At},DATEADD(NOW(),-{{ $json.max_age_days }},'days')),IS_BEFORE({Received At},DATEADD(NOW(),-{{ $json.min_age_minutes }},'minutes')))"
+            },
+            {
+              "name": "pageSize",
+              "value": "50"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "",
+          "name": "LeadRelay Airtable"
+        }
+      }
+    },
+    {
+      "id": "2b3c4d50-0004-4000-8000-000000000004",
+      "name": "Prepare Replays",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Rebuilds each undelivered lead from its stored payload and marks it as a\n// replay, so it runs through the same intake workflow as live traffic.\n// Meta deduplicates on event_id and Airtable upserts on Lead ID, so replaying\n// a lead that actually succeeded is harmless.\n\nconst MAX_EVENT_AGE_DAYS = 7; // Meta rejects events older than this.\nconst records = $json.records ?? [];\nconst out = [];\n\nfor (const record of records) {\n  let payload;\n  try {\n    payload = JSON.parse(record.fields['Raw Payload']);\n  } catch {\n    continue; // Unparseable payload: leave the record for a human.\n  }\n\n  const ageDays = (Date.now() - Date.parse(payload.submitted_at)) / 86400000;\n  if (!Number.isFinite(ageDays) || ageDays > MAX_EVENT_AGE_DAYS) continue;\n\n  out.push({ json: { lead_id: record.fields['Lead ID'], payload: { ...payload, ingest_path: 'replay' } } });\n}\n\nreturn out;\n"
+      }
+    },
+    {
+      "id": "2b3c4d50-0005-4000-8000-000000000005",
+      "name": "Resend to Intake",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.intake_webhook_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "LeadRelay Webhook Secret"
+        }
+      }
+    },
+    {
+      "id": "2b3c4d50-0006-4000-8000-000000000006",
+      "name": "Summarize Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// One summary per run. Reports counts only, never lead contact details.\n\nconst attempted = $('Prepare Replays').all().length;\nconst results = $input.all();\nconst failed = results.filter((item) => item.json.error || item.json.ok === false).length;\nconst delivered = results.length - failed;\nconst icon = failed ? ':warning:' : ':white_check_mark:';\n\nconst lines = [\n  `${icon} *Replay run complete*`,\n  '',\n  `*Undelivered leads found*  ${attempted}`,\n  `*Delivered now*  ${delivered}`,\n  `*Still failing*  ${failed}`,\n  '',\n  failed\n    ? '*Impact*  Failing leads stay marked for replay and will be retried on the next run.'\n    : '*Impact*  All previously undelivered leads now have their Meta event sent.',\n].join('\\n');\n\nreturn [{ json: { attempted, delivered, failed, text: lines } }];\n"
+      }
+    },
+    {
+      "id": "2b3c4d50-0007-4000-8000-000000000007",
+      "name": "Anything Replayed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "any-replayed",
+              "leftValue": "={{ $json.attempted }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "2b3c4d50-0008-4000-8000-000000000008",
+      "name": "Report to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        1540,
+        220
+      ],
+      "parameters": {
+        "authentication": "accessToken",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#leadrelay-alerts",
+          "mode": "name"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": "LeadRelay Slack"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 15 minutes": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Find Undelivered Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Undelivered Leads": {
+      "main": [
+        [
+          {
+            "node": "Prepare Replays",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Replays": {
+      "main": [
+        [
+          {
+            "node": "Resend to Intake",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resend to Intake": {
+      "main": [
+        [
+          {
+            "node": "Summarize Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Run": {
+      "main": [
+        [
+          {
+            "node": "Anything Replayed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anything Replayed?": {
+      "main": [
+        [
+          {
+            "node": "Report to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

@@ -82,8 +82,27 @@ export async function handleLead(request: Request, deps: Deps): Promise<Response
 
   await alertSlack(
     stored.ok
-      ? `Lead ${lead.lead_id} stored via Airtable fallback (CAPI pending replay). n8n error: ${forwarded.reason}`
-      : `Lead ${lead.lead_id} could not be stored. n8n error: ${forwarded.reason}. Airtable error: ${stored.reason}`,
+      ? {
+          severity: 'warning',
+          title: 'Lead stored via fallback',
+          impact: 'Lead is safe. Its Meta event is pending and the replay workflow will deliver it.',
+          fields: {
+            Lead: lead.lead_id,
+            'Stored in': 'Airtable (direct write)',
+            'Meta event': 'Pending replay',
+            'n8n error': forwarded.reason,
+          },
+        }
+      : {
+          severity: 'critical',
+          title: 'Lead could not be stored',
+          impact: 'Action needed: the lead exists only in the visitor browser outbox and Vercel logs.',
+          fields: {
+            Lead: lead.lead_id,
+            'n8n error': forwarded.reason,
+            'Airtable error': stored.reason,
+          },
+        },
     deps,
   )
 
@@ -171,20 +190,48 @@ async function storeFallback(lead: EnrichedLead, { env, fetch }: Deps): Promise<
   }
 }
 
-/** Posts an operational alert. Messages carry lead IDs and error codes only, never PII. */
-async function alertSlack(text: string, { env, fetch, log }: Deps): Promise<void> {
+type Alert = {
+  severity: 'warning' | 'critical'
+  title: string
+  impact: string
+  fields: Record<string, string>
+}
+
+/**
+ * Posts an operational alert as Slack blocks: a titled header, labelled fields,
+ * the impact, and the source. Messages carry lead IDs and error codes only,
+ * never contact details.
+ */
+async function alertSlack(alert: Alert, { env, fetch, log }: Deps): Promise<void> {
+  const icon = alert.severity === 'critical' ? ':rotating_light:' : ':warning:'
+  const body = {
+    text: `${icon} ${alert.title} — ${alert.fields.Lead ?? ''}`.trim(),
+    blocks: [
+      { type: 'header', text: { type: 'plain_text', text: `${icon} ${alert.title}`, emoji: true } },
+      {
+        type: 'section',
+        fields: Object.entries(alert.fields).map(([label, value]) => ({
+          type: 'mrkdwn',
+          text: `*${label}*\n\`${value}\``,
+        })),
+      },
+      { type: 'section', text: { type: 'mrkdwn', text: alert.impact } },
+      { type: 'context', elements: [{ type: 'mrkdwn', text: 'Source: `api/lead` on Vercel' }] },
+    ],
+  }
+
   if (!env.SLACK_WEBHOOK_URL) {
-    log('Slack is not configured; alert not sent', { text })
+    log('Slack is not configured; alert not sent', { title: alert.title, ...alert.fields })
     return
   }
   try {
     await fetch(env.SLACK_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: `[LeadRelay] ${text}` }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(5_000),
     })
   } catch {
-    log('Slack alert failed', { text })
+    log('Slack alert failed', { title: alert.title, ...alert.fields })
   }
 }
