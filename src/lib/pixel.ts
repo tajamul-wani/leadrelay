@@ -2,6 +2,7 @@
 
 type Fbq = {
   (command: 'init', pixelId: string): void
+  (command: 'set', key: 'autoConfig', value: boolean, pixelId: string): void
   (command: 'track', event: string, params?: Record<string, unknown>, options?: { eventID: string }): void
   (command: 'trackCustom', event: string, params?: Record<string, unknown>): void
   callMethod?: (...args: unknown[]) => void
@@ -40,6 +41,11 @@ export function initPixel(): void {
   script.src = 'https://connect.facebook.net/en_US/fbevents.js'
   document.head.appendChild(script)
 
+  // Disable Meta's autoConfig before init. It infers conversion events from button
+  // text and turns on automatic advanced matching, which reads form field values.
+  // On a health-adjacent funnel we send only the data we choose, and only the
+  // events we define.
+  fbq('set', 'autoConfig', false, PIXEL_ID)
   fbq('init', PIXEL_ID)
   fbq('track', 'PageView')
 }
