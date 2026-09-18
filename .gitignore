@@ -35,3 +35,9 @@ docs/paste-*.json
 coverage
 playwright-report
 test-results
+
+# Test output
+/test-results
+/playwright-report
+/blob-report
+/playwright/.cache

@@ -41,7 +41,7 @@ If n8n cannot confirm the lead was stored, the API writes the lead directly to A
 | Database | Airtable |
 | Tracking | Meta Pixel, Meta Conversions API |
 | Alerts | Slack (incoming webhook from the API, bot token from n8n) |
-| Tests | Vitest |
+| Tests | Vitest (unit), Playwright (end-to-end) |
 
 ## Project structure
 
@@ -124,6 +124,7 @@ Append `?test=1` to the funnel URL to mark submissions as test leads (`Is Test` 
 | `npm run dev` | Development server with the local API |
 | `npm run build` | Type-check and production build |
 | `npm test` | Unit tests |
+| `npm run test:e2e` | End-to-end tests (Playwright, Pixel blocked and API stubbed) |
 | `npm run lint` | Lint |
 | `npm run setup:airtable` | Create or update the Airtable `Leads` table schema |
 | `npm run test:lead` | Send a synthetic lead directly to the n8n webhook (`--test`, `--invalid`, `--no-secret`) |
@@ -172,6 +173,10 @@ Three workflows: `lead-intake.json` (webhook), `error-handler.json` (error trigg
 ## Deployment
 
 The project deploys to Vercel as a Vite static site with Functions in `api/`. `vercel.json` rewrites all non-API routes to `index.html` for client-side routing. Set the environment variables in the Vercel project settings.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs lint, type-check and build, unit tests and end-to-end tests on every push and pull request. End-to-end tests stub `/api/lead` and block the Meta Pixel, so CI needs no credentials and makes no third-party calls. The Playwright report is uploaded as an artifact when a run fails.
 
 ## Payload contract
 
