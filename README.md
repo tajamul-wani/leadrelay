@@ -40,7 +40,7 @@ If n8n cannot confirm the lead was stored, the API writes the lead directly to A
 | Automation | n8n |
 | Database | Airtable |
 | Tracking | Meta Pixel, Meta Conversions API |
-| Alerts | Slack incoming webhook |
+| Alerts | Slack (incoming webhook from the API, bot token from n8n) |
 | Tests | Vitest |
 
 ## Project structure
@@ -93,6 +93,16 @@ docs/           Payload contract
 
 Error summaries stored or sent in alerts are reduced to status, error type, code, message and trace ID, with token patterns redacted. Raw HTTP client errors include request headers and are never stored.
 
+### Alerting
+
+Any failed n8n execution triggers `LeadRelay · Error Handler` (`n8n/error-handler.json`), which posts the workflow, failing step, lead ID, sanitized error and the impact on the lead to Slack. The API posts its own alerts for fallback writes (warning) and complete storage failures (critical).
+
+### Replay
+
+`LeadRelay · Replay Failed` (`n8n/replay-failed.json`) runs every 15 minutes. It selects Airtable records with `CAPI Status` of `Pending` or `Failed` that still hold a `Raw Payload`, are less than 7 days old (the Conversions API rejects older events) and at least 10 minutes old (so in-flight leads are left alone), then re-posts each payload to the intake webhook with `ingest_path: "replay"`.
+
+Recovery therefore runs through the same intake path as live traffic rather than a parallel implementation. Airtable upserts on `Lead ID` and Meta deduplicates on `event_id`, so replaying a lead that already succeeded is harmless. Each run reports counts to Slack when there was anything to replay.
+
 Airtable writes use `performUpsert` on `Lead ID`, so retries and replays update the existing record instead of creating duplicates.
 
 ## Local development
@@ -142,6 +152,8 @@ The script is idempotent: it creates the `Leads` table if it's missing and other
 
 ## n8n setup
 
+Three workflows: `lead-intake.json` (webhook), `error-handler.json` (error trigger) and `replay-failed.json` (schedule).
+
 1. Create credentials:
    - **Airtable Personal Access Token:** scopes `data.records:read`, `data.records:write`, `schema.bases:read`.
    - **Header Auth for Meta:** `Authorization: Bearer <Conversions API access token>`.
@@ -153,7 +165,9 @@ The script is idempotent: it creates the `Leads` table if it's missing and other
    - `meta_graph_version`
    - `restricted_states` (comma-separated)
    - `meta_test_event_code`, while testing in Meta Events Manager. Leave it empty in production.
-4. Publish the workflow and set `N8N_WEBHOOK_URL` to its production webhook URL.
+4. Publish the intake workflow and set `N8N_WEBHOOK_URL` to its production webhook URL.
+5. Import `error-handler.json`, select the Slack credential, and set it as the **Error Workflow** in the settings of the other two workflows. It does not need publishing.
+6. Import `replay-failed.json`, select its credentials, set `airtable_base_id` and `intake_webhook_url` in its `Config` node, and publish it.
 
 ## Deployment
 
@@ -168,4 +182,5 @@ The request formats between the browser, the API and n8n are documented in `docs
 - **ZIP to state:** ZIP codes are mapped using 3-digit prefix ranges. The lookup doesn't confirm that a ZIP code exists, and a small number of ZIP codes that span two states resolve to one of them.
 - **n8n retries:** node retry settings retry every error, including 4xx responses.
 - **Duplicate people:** a person who completes the funnel twice creates two leads. Deduplication by email or phone is not implemented.
-- **Not yet implemented:** an n8n error workflow for Slack alerts on failed executions, and a replay workflow for `Pending` and `Failed` Conversions API deliveries.
+- **Replay window:** leads older than 7 days are not replayed, because the Conversions API rejects them. They stay visible in Airtable as `Pending` or `Failed`.
+- **Single Airtable table:** delivery state lives on the lead record rather than in a separate delivery log, so a lead keeps only its most recent delivery attempt and error.
