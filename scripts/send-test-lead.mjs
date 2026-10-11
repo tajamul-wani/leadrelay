@@ -1,29 +1,51 @@
-// Sends a synthetic lead directly to the n8n Lead Intake webhook.
+// Sends a synthetic lead through the pipeline, without a browser.
+//
+// By default it posts to the API, which is the path real traffic takes and
+// which covers whichever delivery route is configured. Posting straight to the
+// n8n webhook is still available for debugging that workflow in isolation.
 //
 // Usage:
-//   npm run test:lead            # production webhook URL
-//   npm run test:lead -- --test  # n8n editor test URL (/webhook-test/)
-//   npm run test:lead -- --invalid
-//   npm run test:lead -- --no-secret
+//   npm run test:lead                          # local API (dev server must be running)
+//   npm run test:lead -- --url https://...     # a deployed API
+//   npm run test:lead -- --n8n                 # straight to the n8n webhook
+//   npm run test:lead -- --n8n --test          # the n8n editor test URL
+//   npm run test:lead -- --invalid             # payload that must be rejected
+//   npm run test:lead -- --restricted          # restricted state, must be refused
+//   npm run test:lead -- --n8n --no-secret     # webhook auth drill
 //
-// Required environment variables:
-//   N8N_WEBHOOK_URL     Production webhook URL of the Lead Intake workflow
-//   N8N_WEBHOOK_SECRET  Value of the X-LeadRelay-Secret header
+// Environment variables are only needed for the --n8n modes:
+//   N8N_WEBHOOK_URL, N8N_WEBHOOK_SECRET
 
 import { randomUUID } from 'node:crypto';
 
-const args = new Set(process.argv.slice(2));
+const argv = process.argv.slice(2);
+const args = new Set(argv);
+const option = (name) => {
+  const index = argv.indexOf(name);
+  return index === -1 ? null : argv[index + 1];
+};
+
+const DEFAULT_API_URL = 'http://localhost:5173/api/lead';
 const { N8N_WEBHOOK_URL, N8N_WEBHOOK_SECRET } = process.env;
 
-if (!N8N_WEBHOOK_URL || !N8N_WEBHOOK_SECRET) {
-  console.error('Missing N8N_WEBHOOK_URL or N8N_WEBHOOK_SECRET.');
-  process.exit(1);
+let url;
+if (args.has('--n8n')) {
+  if (!N8N_WEBHOOK_URL || !N8N_WEBHOOK_SECRET) {
+    console.error('--n8n needs N8N_WEBHOOK_URL and N8N_WEBHOOK_SECRET in the environment.');
+    process.exit(1);
+  }
+  url = args.has('--test') ? N8N_WEBHOOK_URL.replace('/webhook/', '/webhook-test/') : N8N_WEBHOOK_URL;
+} else {
+  url = option('--url') ?? DEFAULT_API_URL;
 }
 
-const url = args.has('--test') ? N8N_WEBHOOK_URL.replace('/webhook/', '/webhook-test/') : N8N_WEBHOOK_URL;
 const id = randomUUID();
 const now = Date.now();
 const fbclid = `IwAR0test${now}`;
+
+// A restricted state is refused before any health question, so the default
+// fixture uses a servable one. --restricted exercises the refusal instead.
+const location = args.has('--restricted') ? { zip: '90210', state: 'CA' } : { zip: '10001', state: 'NY' };
 
 const lead = {
   lead_id: id,
@@ -34,9 +56,8 @@ const lead = {
     first_name: 'Test',
     last_name: 'Lead',
     email: `test+${id.slice(0, 8)}@example.com`,
-    phone: args.has('--invalid') ? '555-1234' : '+15555550123',
-    zip: '90210',
-    state: 'CA',
+    phone: args.has('--invalid') ? '555-1234' : '+12125550123',
+    ...location,
   },
   quiz: { qualified: true, answers: {} },
   consent: {
@@ -55,23 +76,28 @@ const lead = {
     fbc: `fb.1.${now - 60000}.${fbclid}`,
     fbp: `fb.1.${now - 120000}.1234567890`,
     referrer: null,
-    page_url: `https://leadrelay.vercel.app/?utm_source=facebook&fbclid=${fbclid}`,
+    page_url: `https://leadrelay-funnel.vercel.app/?utm_source=facebook&fbclid=${fbclid}`,
     variant: 'control',
-  },
-  context: {
-    ip: '203.0.113.10',
-    user_agent: 'Mozilla/5.0 (LeadRelay test script)',
-    received_at: new Date(now).toISOString(),
   },
 };
 
+// The API adds IP, user agent and receive time itself; n8n expects them present.
+if (args.has('--n8n')) {
+  lead.context = {
+    ip: '203.0.113.10',
+    user_agent: 'Mozilla/5.0 (LeadRelay test script)',
+    received_at: new Date(now).toISOString(),
+  };
+}
+
 const headers = { 'Content-Type': 'application/json' };
-if (!args.has('--no-secret')) headers['X-LeadRelay-Secret'] = N8N_WEBHOOK_SECRET;
+if (args.has('--n8n') && !args.has('--no-secret')) headers['X-LeadRelay-Secret'] = N8N_WEBHOOK_SECRET;
 
 const started = Date.now();
 const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(lead) });
 const text = await res.text();
 
+console.log(`target:  ${url}`);
 console.log(`lead_id: ${id}`);
 console.log(`status:  ${res.status} (${Date.now() - started} ms)`);
 console.log(`body:    ${text}`);
