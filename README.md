@@ -17,18 +17,39 @@ Vercel Function (api/lead.ts -> server/lead-handler.ts)
   |  reject restricted states, drop honeypot submissions
   |  add client IP, user agent, receive time
   |
-  |  POST webhook (X-LeadRelay-Secret), retries on 5xx and timeouts
-  v
-n8n: LeadRelay Lead Intake (n8n/lead-intake.json)
-  |  validate, map fields, upsert Airtable record on Lead ID
-  |  respond 200 only after the record is stored
-  |  build Conversions API event (normalized, SHA-256 hashed user data)
-  |  send to Meta, record CAPI Status on the Airtable record
+  |  then one of two interchangeable delivery paths:
+  |
+  +--> n8n: LeadRelay Lead Intake (n8n/lead-intake.json)
+  |      when N8N_WEBHOOK_URL and N8N_WEBHOOK_SECRET are set.
+  |      Retries on 5xx and timeouts; on failure the API writes the lead
+  |      directly to Airtable (Ingest Path = Fallback, CAPI Status = Pending)
+  |      and alerts Slack, so the lead is never lost.
+  |
+  +--> in-process pipeline (server/pipeline/)
+         otherwise. Same steps, in TypeScript, under unit test.
+  |
+  |  both paths: upsert the Airtable record on Lead ID, respond only once it
+  |  is stored, then send the Conversions API event and record its status
   v
 Airtable: Leads table            Meta Conversions API
 ```
 
-If n8n cannot confirm the lead was stored, the API writes the lead directly to Airtable with `Ingest Path = Fallback` and `CAPI Status = Pending`, and posts an alert to Slack.
+In both paths a success response means the lead is **stored**, not merely received. Every recovery decision downstream depends on that distinction.
+
+## Ingest paths
+
+The lead pipeline is implemented twice, on purpose.
+
+| | n8n | In-process |
+|---|---|---|
+| Selected when | `N8N_WEBHOOK_URL` and `N8N_WEBHOOK_SECRET` are set | Otherwise |
+| Lives in | `n8n/lead-intake.json` | `server/pipeline/` |
+| Strength | Every run is inspectable; steps can be changed without a deploy | Version controlled, unit tested, no third-party execution quota |
+| Failure handling | API retries, then falls back to a direct Airtable write | Storage failure is reported directly; Airtable is already the destination |
+
+n8n earns its place where a workflow changes often and somebody needs to see what happened on a given run. But the lead path is the revenue path, so it also belongs in version control and under test — and the public demo cannot depend on a metered execution quota. Keeping both, behind one environment switch, makes the trade-off explicit rather than theoretical.
+
+Both paths write the same Airtable fields (`server/pipeline/fields.ts` mirrors the n8n `Validate Lead` node) and send the same deduplicated Conversions API event.
 
 ## Tech stack
 
@@ -47,7 +68,8 @@ If n8n cannot confirm the lead was stored, the API writes the lead directly to A
 
 ```
 api/            Vercel Function entry points
-server/         API request handling (validation, n8n forwarding, fallback, alerts)
+server/         API request handling (validation, delivery, fallback, alerts)
+  pipeline/     In-process lead pipeline: Airtable write, Conversions API, error sanitizing
 shared/         Code used by both browser and API: lead schema, compliance settings, ZIP lookup
 src/
   funnel/       Step definitions, branching, qualification, state, submission and outbox
@@ -89,7 +111,10 @@ docs/           Payload contract
 | n8n rejects the request (4xx) | No retry; Airtable fallback and Slack alert |
 | n8n and Airtable both unavailable | API returns 503; the browser outbox keeps the lead |
 | Airtable write fails inside n8n | Webhook responds 503 and the execution is marked failed |
-| Conversions API call fails | Record set to `CAPI Status = Failed` with a sanitized error summary; execution marked failed |
+| Airtable write fails on the in-process path | 503 with a critical Slack alert; the browser outbox keeps the lead |
+| Conversions API returns 5xx, 429 or times out | Retried twice with backoff before being recorded as failed |
+| Conversions API call fails | Record set to `CAPI Status = Failed` with a sanitized error summary. The lead is stored, so the response is still a success |
+| Conversions API returns 200 with `events_received: 0` | Treated as a failure. A status code is not evidence of delivery |
 
 Error summaries stored or sent in alerts are reduced to status, error type, code, message and trace ID, with token patterns redacted. Raw HTTP client errors include request headers and are never stored.
 
@@ -136,10 +161,14 @@ See `.env.example`. Only variables prefixed with `VITE_` are exposed to the brow
 | Variable | Used by | Purpose |
 |---|---|---|
 | `VITE_META_PIXEL_ID` | Browser | Meta Pixel / dataset ID |
-| `N8N_WEBHOOK_URL` | API, scripts | n8n Lead Intake production webhook URL |
+| `N8N_WEBHOOK_URL` | API, scripts | n8n Lead Intake webhook URL. Selects the n8n path when set with the secret |
 | `N8N_WEBHOOK_SECRET` | API, scripts | Value of the `X-LeadRelay-Secret` header |
 | `AIRTABLE_BASE_ID` | API, scripts | Airtable base ID |
-| `AIRTABLE_TOKEN` | API | Token for the fallback write |
+| `AIRTABLE_TOKEN` | API | Token for the Airtable write |
+| `META_PIXEL_ID` | API | Meta dataset ID, in-process path only |
+| `META_CAPI_TOKEN` | API | Conversions API access token, in-process path only |
+| `META_GRAPH_VERSION` | API | Graph API version. Defaults to `v24.0` |
+| `META_TEST_EVENT_CODE` | API | Set only while verifying events in Events Manager |
 | `SLACK_WEBHOOK_URL` | API | Slack incoming webhook for alerts |
 | `AIRTABLE_SETUP_TOKEN` | Setup script | Token with schema read and write scopes |
 
@@ -185,7 +214,8 @@ The request formats between the browser, the API and n8n are documented in `docs
 ## Known limitations
 
 - **ZIP to state:** ZIP codes are mapped using 3-digit prefix ranges. The lookup doesn't confirm that a ZIP code exists, and a small number of ZIP codes that span two states resolve to one of them.
-- **n8n retries:** node retry settings retry every error, including 4xx responses.
+- **n8n retries:** node retry settings retry every error, including 4xx responses. The in-process path distinguishes retryable failures from permanent ones.
+- **No scheduled replay on the in-process path:** `CAPI Status = Failed` records are retried by `LeadRelay · Replay Failed`, which runs in n8n. With n8n not configured, a failed conversion event has to be resent by hand until that job is reimplemented in the repo.
 - **Duplicate people:** a person who completes the funnel twice creates two leads. Deduplication by email or phone is not implemented.
 - **Replay window:** leads older than 7 days are not replayed, because the Conversions API rejects them. They stay visible in Airtable as `Pending` or `Failed`.
 - **Single Airtable table:** delivery state lives on the lead record rather than in a separate delivery log, so a lead keeps only its most recent delivery attempt and error.
