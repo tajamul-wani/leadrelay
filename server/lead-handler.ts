@@ -1,33 +1,24 @@
 import { RESTRICTED_STATES } from '../shared/compliance.js'
-import { leadSubmissionSchema, type NormalizedLead } from '../shared/lead.js'
+import { leadSubmissionSchema } from '../shared/lead.js'
+import type { Deps, EnrichedLead } from './deps.js'
+import { runPipeline, usesN8n } from './pipeline/index.js'
 
 // Request handler behind POST /api/lead.
 //
 // 1. Validate and normalize the payload (shared schema with the funnel).
 // 2. Add server-side context: client IP, user agent, receive time.
-// 3. Forward to the n8n Lead Intake webhook, retrying transient failures.
-// 4. If n8n cannot confirm the lead was stored, write it directly to Airtable
-//    as a fallback (CAPI Status "Pending") and alert Slack, so the lead is never
-//    lost and can be replayed through n8n later.
+// 3. Deliver the lead, by one of two interchangeable paths:
+//    - n8n, when a webhook URL and secret are configured. Transient failures are
+//      retried; if n8n cannot confirm the lead was stored, the lead is written
+//      directly to Airtable as a fallback (CAPI Status "Pending") so it is never
+//      lost and can be replayed through n8n later.
+//    - the in-process pipeline otherwise, which stores the lead and sends the
+//      conversion event itself. See pipeline/index.ts for why both exist.
+//
+// In both paths a success response means the lead is stored, not that it was
+// received. Everything downstream depends on that distinction.
 
-export type Env = {
-  N8N_WEBHOOK_URL?: string
-  N8N_WEBHOOK_SECRET?: string
-  AIRTABLE_BASE_ID?: string
-  AIRTABLE_TOKEN?: string
-  SLACK_WEBHOOK_URL?: string
-}
-
-export type Deps = {
-  env: Env
-  fetch: typeof fetch
-  sleep: (ms: number) => Promise<void>
-  log: (message: string, detail?: Record<string, unknown>) => void
-}
-
-export type EnrichedLead = NormalizedLead & {
-  context: { ip: string | null; user_agent: string | null; received_at: string }
-}
+export type { Deps, Env, EnrichedLead } from './deps.js'
 
 const MAX_BODY_BYTES = 32_000
 const N8N_TIMEOUT_MS = 15_000
@@ -74,6 +65,8 @@ export async function handleLead(request: Request, deps: Deps): Promise<Response
     },
   }
 
+  if (!usesN8n(deps.env)) return deliverInProcess(enriched, deps)
+
   const forwarded = await forwardToN8n(enriched, deps)
   if (forwarded.ok) return json(200, { ok: true, lead_id: lead.lead_id })
 
@@ -108,6 +101,55 @@ export async function handleLead(request: Request, deps: Deps): Promise<Response
 
   if (stored.ok) return json(202, { ok: true, lead_id: lead.lead_id })
   return json(503, { ok: false, message: 'We could not send your details. Please try again in a moment.' })
+}
+
+/**
+ * Stores the lead and sends the conversion event here, with no automation
+ * platform in the path.
+ *
+ * There is no Airtable fallback on this path, because Airtable is already the
+ * destination: a storage failure is reported as one rather than retried against
+ * the same service that just refused the write.
+ */
+async function deliverInProcess(lead: EnrichedLead, deps: Deps): Promise<Response> {
+  const result = await runPipeline(lead, deps)
+
+  if (!result.ok) {
+    deps.log('Pipeline could not store the lead', { lead_id: lead.lead_id, reason: result.reason })
+    await alertSlack(
+      {
+        severity: 'critical',
+        title: 'Lead could not be stored',
+        impact: 'Action needed: the lead exists only in the visitor browser outbox and Vercel logs.',
+        fields: {
+          Lead: lead.lead_id,
+          'Ingest path': 'In-process pipeline',
+          'Airtable error': result.reason,
+        },
+      },
+      deps,
+    )
+    return json(503, { ok: false, message: 'We could not send your details. Please try again in a moment.' })
+  }
+
+  if (result.capi === 'failed') {
+    await alertSlack(
+      {
+        severity: 'warning',
+        title: 'Conversion event not delivered',
+        impact: 'Lead is safe in Airtable. Its Meta event is marked Failed and needs to be resent.',
+        fields: {
+          Lead: lead.lead_id,
+          'Stored in': 'Airtable',
+          'Meta event': 'Failed',
+          'Meta error': result.reason ?? 'unknown error',
+        },
+      },
+      deps,
+    )
+  }
+
+  return json(200, { ok: true, lead_id: lead.lead_id })
 }
 
 export function clientIp(request: Request): string | null {
