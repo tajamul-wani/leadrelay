@@ -48,10 +48,20 @@ export function summarizeApiError(status: number, body: unknown): string {
   return redact(parts.filter(Boolean).join(' | ')).slice(0, MAX_SUMMARY_LENGTH)
 }
 
-/** Describes a thrown fetch error by kind only. Messages can contain the request URL. */
+/**
+ * Describes a thrown fetch error by kind only, never by message, because
+ * messages can carry the request URL.
+ *
+ * Node reports every connection problem as a bare `TypeError`, which says
+ * nothing useful on its own. The cause carries the code that distinguishes a
+ * DNS failure from a refused connection from a timeout, and a code is safe to
+ * keep: no URL, no headers, no credentials.
+ */
 export function describeThrown(error: unknown): string {
-  if (error instanceof Error) return error.name === 'TimeoutError' ? 'timeout' : error.name
-  return 'network error'
+  if (!(error instanceof Error)) return 'network error'
+  if (error.name === 'TimeoutError') return 'timeout'
+  const code = (error.cause as { code?: string } | undefined)?.code
+  return code ? `${error.name} (${code})` : error.name
 }
 
 function extractError(body: unknown): ApiErrorShape {
