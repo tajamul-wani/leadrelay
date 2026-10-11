@@ -23,16 +23,25 @@ const env = {
   SLACK_WEBHOOK_URL: 'https://hooks.slack.test/x',
 }
 
-function setup(responses: Record<string, Array<number | Error>>) {
+/** A stubbed response: a status code, a status with a body, or a thrown error. */
+type Stub = number | Error | { status: number; body: unknown }
+
+function setup(responses: Record<string, Stub[]>, envOverride: Partial<typeof env> = {}) {
   const calls: Array<{ url: string; body: string }> = []
   const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const key = Object.keys(responses).find((prefix) => String(url).startsWith(prefix))!
     calls.push({ url: String(url), body: String(init?.body ?? '') })
     const next = responses[key].length > 1 ? responses[key].shift()! : responses[key][0]
     if (next instanceof Error) throw next
-    return new Response('{}', { status: next })
+    if (typeof next === 'number') return new Response('{}', { status: next })
+    return new Response(JSON.stringify(next.body), { status: next.status })
   })
-  const deps: Deps = { env, fetch: fetch as unknown as typeof globalThis.fetch, sleep: async () => {}, log: () => {} }
+  const deps: Deps = {
+    env: { ...env, ...envOverride },
+    fetch: fetch as unknown as typeof globalThis.fetch,
+    sleep: async () => {},
+    log: () => {},
+  }
   return { deps, calls }
 }
 
@@ -104,6 +113,66 @@ describe('handleLead', () => {
     const alert = JSON.parse(calls.at(-1)!.body)
     expect(alert.blocks[0].text.text).toContain('Lead could not be stored')
     expect(alert.text).toContain(':rotating_light:')
+  })
+})
+
+describe('handleLead with no n8n configured', () => {
+  // Removing the n8n variables switches delivery to the in-process pipeline.
+  // Both paths store the lead and send the same deduplicated Meta event.
+  const inProcess = {
+    N8N_WEBHOOK_URL: '',
+    N8N_WEBHOOK_SECRET: '',
+    META_PIXEL_ID: '1234567890',
+    META_CAPI_TOKEN: 'EAAtoken',
+  }
+  const upsertOk = { status: 200, body: { records: [{ id: 'recTEST', fields: {} }] } }
+  const metaOk = { status: 200, body: { events_received: 1 } }
+
+  it('stores the lead and sends the conversion event without calling n8n', async () => {
+    const { deps, calls } = setup(
+      { 'https://api.airtable.com': [upsertOk, 200], 'https://graph.facebook.com': [metaOk] },
+      inProcess,
+    )
+    const res = await handleLead(post(lead), deps)
+
+    expect(res.status).toBe(200)
+    expect(calls.map((c) => new URL(c.url).host)).toEqual([
+      'api.airtable.com',
+      'graph.facebook.com',
+      'api.airtable.com',
+    ])
+    expect(JSON.parse(calls[0].body).records[0].fields).toMatchObject({ 'Ingest Path': 'Live' })
+  })
+
+  it('still returns 200 when the event fails, and warns that it needs resending', async () => {
+    const { deps, calls } = setup(
+      {
+        'https://api.airtable.com': [upsertOk, 200],
+        'https://graph.facebook.com': [{ status: 400, body: { error: { type: 'OAuthException' } } }],
+        'https://hooks.slack.test': [200],
+      },
+      inProcess,
+    )
+    const res = await handleLead(post(lead), deps)
+
+    // The lead is stored, so the visitor is told it worked. The gap is reported.
+    expect(res.status).toBe(200)
+    const alert = JSON.parse(calls.at(-1)!.body)
+    expect(alert.blocks[0].text.text).toContain('Conversion event not delivered')
+    expect(alert.text).toContain(':warning:')
+  })
+
+  it('returns 503 with a critical alert when the lead cannot be stored', async () => {
+    const { deps, calls } = setup(
+      { 'https://api.airtable.com': [500], 'https://hooks.slack.test': [200] },
+      inProcess,
+    )
+    const res = await handleLead(post(lead), deps)
+
+    expect(res.status).toBe(503)
+    const alert = JSON.parse(calls.at(-1)!.body)
+    expect(alert.blocks[0].text.text).toContain('Lead could not be stored')
+    expect(calls[1].body).not.toContain('jane@example.com')
   })
 })
 
