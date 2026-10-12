@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "setup:airtable": "node --dns-result-order=ipv4first --network-family-autoselection-attempt-timeout=2000 --env-file=.env.local scripts/setup-airtable.mjs",
     "test:lead": "node --dns-result-order=ipv4first --network-family-autoselection-attempt-timeout=2000 --env-file=.env.local scripts/send-test-lead.mjs",
+    "replay": "node --dns-result-order=ipv4first --network-family-autoselection-attempt-timeout=2000 --env-file=.env.local scripts/replay-pending.mjs",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "playwright test"
   },
