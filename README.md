@@ -124,9 +124,16 @@ Any failed n8n execution triggers `LeadRelay · Error Handler` (`n8n/error-handl
 
 ### Replay
 
-`LeadRelay · Replay Failed` (`n8n/replay-failed.json`) runs every 15 minutes. It selects Airtable records with `CAPI Status` of `Pending` or `Failed` that still hold a `Raw Payload`, are less than 7 days old (the Conversions API rejects older events) and at least 10 minutes old (so in-flight leads are left alone), then re-posts each payload to the intake webhook with `ingest_path: "replay"`.
+A lead whose conversion event never reached Meta is left at `CAPI Status` of `Pending` or `Failed` with its full payload in `Raw Payload`. Two implementations recover it, matching the two ingest paths:
 
-Recovery therefore runs through the same intake path as live traffic rather than a parallel implementation. Airtable upserts on `Lead ID` and Meta deduplicates on `event_id`, so replaying a lead that already succeeded is harmless. Each run reports counts to Slack when there was anything to replay.
+- **`LeadRelay · Replay Failed`** (`n8n/replay-failed.json`) runs on a schedule every 15 minutes and reports counts to Slack.
+- **`npm run replay`** (`scripts/replay-pending.mjs`) does the same from the repo, for deployments that do not run n8n.
+
+Both select the same records — undelivered, with a stored payload, at least 10 minutes old so in-flight leads are left alone, and less than 7 days old because the Conversions API rejects older events — then re-post each payload with `ingest_path: "replay"`.
+
+Recovery therefore runs through the same intake path as live traffic rather than a parallel implementation, which is deliberate: a separate recovery path only runs on your worst day, so it is the code you can least afford to trust. The replay marker means the record keeps saying how the lead originally arrived instead of being relabelled as live traffic, and the attempt counter carries forward rather than resetting.
+
+Airtable upserts on `Lead ID` and Meta deduplicates on `event_id`, so replaying a lead that already succeeded is harmless.
 
 Airtable writes use `performUpsert` on `Lead ID`, so retries and replays update the existing record instead of creating duplicates.
 
@@ -152,7 +159,8 @@ Append `?test=1` to the funnel URL to mark submissions as test leads (`Is Test` 
 | `npm run test:e2e` | End-to-end tests (Playwright, Pixel blocked and API stubbed) |
 | `npm run lint` | Lint |
 | `npm run setup:airtable` | Create or update the Airtable `Leads` table schema |
-| `npm run test:lead` | Send a synthetic lead directly to the n8n webhook (`--test`, `--invalid`, `--no-secret`) |
+| `npm run test:lead` | Send a synthetic lead through the API (`--url`, `--invalid`, `--restricted`, or `--n8n` to target the webhook directly) |
+| `npm run replay` | Re-deliver leads left at `CAPI Status` `Pending` or `Failed` (`--url`, `--dry-run`) |
 
 ## Environment variables
 
@@ -215,7 +223,7 @@ The request formats between the browser, the API and n8n are documented in `docs
 
 - **ZIP to state:** ZIP codes are mapped using 3-digit prefix ranges. The lookup doesn't confirm that a ZIP code exists, and a small number of ZIP codes that span two states resolve to one of them.
 - **n8n retries:** node retry settings retry every error, including 4xx responses. The in-process path distinguishes retryable failures from permanent ones.
-- **No scheduled replay on the in-process path:** `CAPI Status = Failed` records are retried by `LeadRelay · Replay Failed`, which runs in n8n. With n8n not configured, a failed conversion event has to be resent by hand until that job is reimplemented in the repo.
+- **Replay is not scheduled without n8n:** `npm run replay` recovers undelivered leads from the repo, but nothing runs it automatically. The n8n workflow has a schedule trigger; the script needs cron or a scheduled function.
 - **Duplicate people:** a person who completes the funnel twice creates two leads. Deduplication by email or phone is not implemented.
 - **Replay window:** leads older than 7 days are not replayed, because the Conversions API rejects them. They stay visible in Airtable as `Pending` or `Failed`.
 - **Single Airtable table:** delivery state lives on the lead record rather than in a separate delivery log, so a lead keeps only its most recent delivery attempt and error.
