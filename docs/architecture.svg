@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1540 850" width="1540" height="850" role="img" aria-label="LeadRelay architecture: ad click through funnel and serverless API to either n8n or the in-process pipeline, then Airtable and the Meta Conversions API, with fallback, alerting and replay paths">
+<defs></defs>
+<rect width="1540" height="850" fill="#ffffff" />
+<text x="40" y="48" font-size="24" fill="#1e1e1e" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">LeadRelay — how a lead travels, and what happens when a step fails</text>
+<text x="40" y="99" font-size="13" fill="#1971c2" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">HAPPY PATH</text>
+<rect x="40" y="112" width="200" height="104" rx="12" fill="#e7f5ff" stroke="#1971c2" stroke-width="2" />
+<text x="56" y="142" font-size="16" fill="#1971c2" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">Meta ad click</text>
+<text x="56" y="167" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">URL carries UTMs</text>
+<text x="56" y="188" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">and fbclid</text>
+<rect x="290" y="112" width="240" height="104" rx="12" fill="#e7f5ff" stroke="#1971c2" stroke-width="2" />
+<text x="306" y="142" font-size="16" fill="#1971c2" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">Funnel · React</text>
+<text x="306" y="167" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">ZIP first, quiz, consent</text>
+<text x="306" y="188" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">mints one UUID, fires Pixel</text>
+<rect x="580" y="112" width="250" height="104" rx="12" fill="#e7f5ff" stroke="#1971c2" stroke-width="2" />
+<text x="596" y="142" font-size="16" fill="#1971c2" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">Serverless API</text>
+<text x="596" y="167" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">validate · block states</text>
+<text x="596" y="188" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">drop bots · add IP, agent</text>
+<rect x="880" y="70" width="310" height="200" rx="12" fill="#f1f3f5" stroke="#495057" stroke-width="2" stroke-dasharray="8 6" />
+<text x="896" y="100" font-size="16" fill="#495057" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">Delivery — whichever is configured</text>
+<rect x="900" y="112" width="270" height="64" rx="12" fill="#ebfbee" stroke="#2f9e44" stroke-width="2" />
+<text x="916" y="142" font-size="16" fill="#2f9e44" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">n8n · Lead Intake</text>
+<text x="916" y="167" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">when a webhook URL is set</text>
+<rect x="900" y="190" width="270" height="64" rx="12" fill="#ebfbee" stroke="#2f9e44" stroke-width="2" />
+<text x="916" y="220" font-size="16" fill="#2f9e44" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">In-process pipeline</text>
+<text x="916" y="245" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">server/pipeline/ · default</text>
+<rect x="1240" y="70" width="220" height="84" rx="12" fill="#e7f5ff" stroke="#1971c2" stroke-width="2" />
+<text x="1256" y="100" font-size="16" fill="#1971c2" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">Airtable</text>
+<text x="1256" y="125" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">one row per lead,</text>
+<text x="1256" y="146" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">upserted on Lead ID</text>
+<rect x="1240" y="186" width="220" height="92" rx="12" fill="#e7f5ff" stroke="#1971c2" stroke-width="2" />
+<text x="1256" y="216" font-size="16" fill="#1971c2" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">Meta CAPI</text>
+<text x="1256" y="241" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">same event_id as the</text>
+<text x="1256" y="262" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">Pixel, counted once</text>
+<path d="M 240 164 L 286 164" fill="none" stroke="#1e1e1e" stroke-width="2" />
+<polygon points="286,164 276.0,168.5 276.0,159.5" fill="#1e1e1e" />
+<path d="M 530 164 L 576 164" fill="none" stroke="#1e1e1e" stroke-width="2" />
+<polygon points="576,164 566.0,168.5 566.0,159.5" fill="#1e1e1e" />
+<text x="500" y="240" font-size="12" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">POST /api/lead</text>
+<path d="M 830 164 L 876 164" fill="none" stroke="#1e1e1e" stroke-width="2" />
+<polygon points="876,164 866.0,168.5 866.0,159.5" fill="#1e1e1e" />
+<path d="M 1170 140 L 1236 112" fill="none" stroke="#1e1e1e" stroke-width="2" />
+<polygon points="1236,112 1228.5,120.1 1225.0,111.8" fill="#1e1e1e" />
+<path d="M 1170 222 L 1236 232" fill="none" stroke="#1e1e1e" stroke-width="2" />
+<polygon points="1236,232 1225.4,234.9 1226.7,226.1" fill="#1e1e1e" />
+<text x="40" y="343" font-size="13" fill="#e03131" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">WHEN A LAYER FAILS</text>
+<rect x="290" y="380" width="240" height="100" rx="12" fill="#fff5f5" stroke="#e03131" stroke-width="2" />
+<text x="306" y="410" font-size="16" fill="#e03131" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">Browser outbox</text>
+<text x="306" y="435" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">retries, then keeps the</text>
+<text x="306" y="456" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">lead for the next visit</text>
+<rect x="580" y="380" width="250" height="100" rx="12" fill="#fff5f5" stroke="#e03131" stroke-width="2" />
+<text x="596" y="410" font-size="16" fill="#e03131" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">Airtable fallback</text>
+<text x="596" y="435" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">API writes it directly,</text>
+<text x="596" y="456" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">Ingest Path = Fallback</text>
+<rect x="880" y="380" width="310" height="100" rx="12" fill="#fff5f5" stroke="#e03131" stroke-width="2" />
+<text x="896" y="410" font-size="16" fill="#e03131" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">Delivery state on the row</text>
+<text x="896" y="435" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">CAPI Status Pending or Failed,</text>
+<text x="896" y="456" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">attempt count, sanitized error</text>
+<path d="M 410 220 L 410 376" fill="none" stroke="#e03131" stroke-width="2" stroke-dasharray="7 5" />
+<polygon points="410,376 405.5,366.0 414.5,366.0" fill="#e03131" />
+<text x="300" y="302" font-size="12" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">API unreachable</text>
+<path d="M 700 220 L 700 376" fill="none" stroke="#e03131" stroke-width="2" stroke-dasharray="7 5" />
+<polygon points="700,376 695.5,366.0 704.5,366.0" fill="#e03131" />
+<text x="592" y="302" font-size="12" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">delivery path down</text>
+<path d="M 1035 274 L 1035 376" fill="none" stroke="#e03131" stroke-width="2" stroke-dasharray="7 5" />
+<polygon points="1035,376 1030.5,366.0 1039.5,366.0" fill="#e03131" />
+<text x="1047" y="300" font-size="12" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">event rejected</text>
+<text x="40" y="553" font-size="13" fill="#f08c00" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">RECOVERY</text>
+<rect x="580" y="580" width="250" height="96" rx="12" fill="#fff9db" stroke="#f08c00" stroke-width="2" />
+<text x="596" y="610" font-size="16" fill="#f08c00" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">Slack alert</text>
+<text x="596" y="635" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">is the lead safe, and</text>
+<text x="596" y="656" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">what is still outstanding</text>
+<rect x="880" y="580" width="310" height="96" rx="12" fill="#fff9db" stroke="#f08c00" stroke-width="2" />
+<text x="896" y="610" font-size="16" fill="#f08c00" font-weight="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">Replay</text>
+<text x="896" y="635" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">npm run replay, or the n8n</text>
+<text x="896" y="656" font-size="13" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">schedule — same intake path</text>
+<path d="M 700 484 L 700 576" fill="none" stroke="#f08c00" stroke-width="2" stroke-dasharray="7 5" />
+<polygon points="700,576 695.5,566.0 704.5,566.0" fill="#f08c00" />
+<path d="M 1035 484 L 1035 576" fill="none" stroke="#f08c00" stroke-width="2" stroke-dasharray="7 5" />
+<polygon points="1035,576 1030.5,566.0 1039.5,566.0" fill="#f08c00" />
+<path d="M 1190 628 L 1490 628 L 1490 344 L 790 344 L 790 222" fill="none" stroke="#f08c00" stroke-width="2" stroke-dasharray="7 5" />
+<polygon points="790,222 794.5,232.0 785.5,232.0" fill="#f08c00" />
+<text x="822" y="328" font-size="12" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">re-posted through the same intake path</text>
+<text x="40" y="732" font-size="14" fill="#1e1e1e" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">One UUID is the Airtable key, the Pixel event ID and the Conversions API event ID:</text>
+<text x="40" y="756" font-size="14" fill="#1e1e1e" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">a retry cannot duplicate a row, and Meta cannot double-count a conversion.</text>
+<text x="40" y="792" font-size="14" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">A success response means the lead is stored, not merely received — which is what makes every recovery decision correct.</text>
+<text x="40" y="816" font-size="14" fill="#5c5f66" font-weight="400" font-family="Segoe UI, Helvetica, Arial, sans-serif">A replayed lead is recorded as Ingest Path = Replay, so the record keeps saying how it first arrived.</text>
+</svg>
