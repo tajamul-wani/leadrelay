@@ -35,6 +35,12 @@ export const leadSubmissionSchema = z.object({
   event_id: z.uuid(),
   submitted_at: z.iso.datetime(),
   is_test: z.boolean(),
+  /**
+   * How this submission reached the API. The funnel omits it; a recovery run
+   * sets "replay" so the record keeps saying how it originally arrived instead
+   * of being relabelled as live traffic.
+   */
+  ingest_path: z.enum(['live', 'replay']).optional(),
   /** Hidden honeypot field. Humans never see it; a value means the submission is automated. */
   website: z.string().max(200).optional(),
   contact: z.object({

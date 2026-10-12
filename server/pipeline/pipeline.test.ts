@@ -207,6 +207,15 @@ describe('runPipeline', () => {
     expect(record['CAPI Status']).toBe('Skipped')
   })
 
+  it('records a recovered lead as a replay rather than relabelling it live', async () => {
+    const { deps, calls } = setup({ [AIRTABLE]: [upsertOk, { status: 200 }], [META]: [metaOk] })
+    await runPipeline({ ...lead, ingest_path: 'replay' }, deps)
+
+    const record = (calls[0].body as unknown as { records: Array<{ fields: Record<string, unknown> }> }).records[0]
+      .fields
+    expect(record['Ingest Path']).toBe('Replay')
+  })
+
   it('adds the test event code only while one is configured', async () => {
     const { deps, calls } = setup(
       { [AIRTABLE]: [upsertOk, { status: 200 }], [META]: [metaOk] },

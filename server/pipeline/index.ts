@@ -40,7 +40,7 @@ export async function runPipeline(lead: EnrichedLead, deps: Deps): Promise<Pipel
 
   const stored = await upsertLead(
     toAirtableFields(lead, {
-      ingestPath: 'Live',
+      ingestPath: lead.ingest_path === 'replay' ? 'Replay' : 'Live',
       restrictedStates: RESTRICTED_STATES,
       capiStatus: metaConfigured ? 'Pending' : 'Skipped',
     }),
