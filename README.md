@@ -6,35 +6,17 @@ The demo funnel, BenefitBridge, is a Social Security disability benefits eligibi
 
 ## Architecture
 
-```
-Browser (React, Vite, TypeScript)
-  |  Meta Pixel: PageView, QuizStepCompleted, Lead (eventID = lead_id)
-  |
-  |  POST /api/lead
-  v
-Vercel Function (api/lead.ts -> server/lead-handler.ts)
-  |  validate and normalize (shared Zod schema)
-  |  reject restricted states, drop honeypot submissions
-  |  add client IP, user agent, receive time
-  |
-  |  then one of two interchangeable delivery paths:
-  |
-  +--> n8n: LeadRelay Lead Intake (n8n/lead-intake.json)
-  |      when N8N_WEBHOOK_URL and N8N_WEBHOOK_SECRET are set.
-  |      Retries on 5xx and timeouts; on failure the API writes the lead
-  |      directly to Airtable (Ingest Path = Fallback, CAPI Status = Pending)
-  |      and alerts Slack, so the lead is never lost.
-  |
-  +--> in-process pipeline (server/pipeline/)
-         otherwise. Same steps, in TypeScript, under unit test.
-  |
-  |  both paths: upsert the Airtable record on Lead ID, respond only once it
-  |  is stored, then send the Conversions API event and record its status
-  v
-Airtable: Leads table            Meta Conversions API
-```
+![LeadRelay architecture: an ad click reaches the React funnel, which posts to a serverless API; the API validates and enriches the lead and hands it to either the n8n workflow or the in-process pipeline, which store it in Airtable and send a deduplicated Conversions API event. Failure paths cover the browser outbox, the Airtable fallback and per-row delivery state, with Slack alerts and replay through the same intake path.](docs/architecture.svg)
+
+A lead travels in one direction and is checked at every handover:
+
+1. **Funnel** (`src/`) collects the answers and contact details, mints one UUID, and fires the Pixel `Lead` event only after the API accepts the submission.
+2. **Serverless API** (`api/lead.ts` → `server/lead-handler.ts`) validates and normalizes against the shared schema, refuses restricted states, drops honeypot submissions, and adds the client IP, user agent and receive time.
+3. **Delivery** goes through n8n when a webhook URL and secret are configured, and through the in-process pipeline (`server/pipeline/`) otherwise. Both upsert the Airtable record on `Lead ID`, then send the Conversions API event and write its status back to the row.
 
 In both paths a success response means the lead is **stored**, not merely received. Every recovery decision downstream depends on that distinction.
+
+The diagram is editable: the Excalidraw source is in `docs/architecture.excalidraw`.
 
 ## Ingest paths
 
@@ -84,6 +66,7 @@ docs/           Payload contract
 ## Funnel
 
 - **Step order:** ZIP code first, so people in restricted states are told immediately and are never asked health questions. The quiz steps follow, then contact details.
+- **ZIP to state:** resolved client-side from 3-digit prefix ranges (`shared/zip.ts`), which keeps the lookup offline and instant as the visitor types.
 - **Steps as data:** defined in `src/funnel/steps.ts`. A step can be conditional (`when`), and answers to steps that become hidden are pruned.
 - **One URL per step:** browser navigation works, and a typed URL beyond the first unanswered step redirects back to it.
 - **Refresh-safe:** answers are kept in `sessionStorage`.
@@ -219,11 +202,3 @@ The project deploys to Vercel as a Vite static site with Functions in `api/`. `v
 
 The request formats between the browser, the API and n8n are documented in `docs/lead-payload.md`.
 
-## Known limitations
-
-- **ZIP to state:** ZIP codes are mapped using 3-digit prefix ranges. The lookup doesn't confirm that a ZIP code exists, and a small number of ZIP codes that span two states resolve to one of them.
-- **n8n retries:** node retry settings retry every error, including 4xx responses. The in-process path distinguishes retryable failures from permanent ones.
-- **Replay is not scheduled without n8n:** `npm run replay` recovers undelivered leads from the repo, but nothing runs it automatically. The n8n workflow has a schedule trigger; the script needs cron or a scheduled function.
-- **Duplicate people:** a person who completes the funnel twice creates two leads. Deduplication by email or phone is not implemented.
-- **Replay window:** leads older than 7 days are not replayed, because the Conversions API rejects them. They stay visible in Airtable as `Pending` or `Failed`.
-- **Single Airtable table:** delivery state lives on the lead record rather than in a separate delivery log, so a lead keeps only its most recent delivery attempt and error.
